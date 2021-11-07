@@ -1,0 +1,118 @@
+---
+title: "Does Noodle the Pug Have Bones?"
+author: "Eric R. Scott"
+output: 
+   html_document: 
+    toc: yes
+    toc_float: yes
+    number_sections: no
+    highlight: kate
+    theme:
+      version: 4
+      bootswatch: flatly
+---
+*last updated `r Sys.Date()`*
+
+```{r setup}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+Load packages:
+
+```{r}
+library(googlesheets4)
+library(janitor)
+library(tidyverse)
+library(lubridate)
+library(broom)
+library(car)
+library(gt)
+theme_set(theme_bw())
+```
+
+# Data Source
+
+I've compiled the results of #BonesNoBones in a [Google Sheet](https://docs.google.com/spreadsheets/d/1Qi4YjmEu6pYpUI-Tnu4h1I2gJNfPRWztaObV9ZNLb5o/edit#gid=0) that can be read in with `read_sheet()` from the `googlesheets4` package.
+
+
+```{r}
+noodle <- 
+  read_sheet("1Qi4YjmEu6pYpUI-Tnu4h1I2gJNfPRWztaObV9ZNLb5o") %>%
+  clean_names()
+head(noodle)
+```
+
+# Overall probability of bones
+
+```{r}
+total_bones <- 
+  noodle %>% 
+  summarize(bones = sum(bones == "yes")/n())
+total_bones
+```
+
+The overall chance of a bones day is `r round(total_bones$bones * 100)`%.
+
+# Bones days by day of week
+
+Are bones more or less likely depending on the day of the week?
+
+```{r}
+noodle <- 
+  noodle %>% 
+  mutate(dow = wday(date, label = TRUE))
+
+by_dow <- 
+  noodle %>% 
+  group_by(dow) %>% 
+  summarize(total_readings = n(),
+            bones = sum(bones == "yes") / total_readings) 
+gt(by_dow)
+```
+
+It looks like bones are more likely on some days than others.
+
+```{r}
+ggplot(by_dow, aes(x = dow, y = bones)) +
+  geom_col(fill = "darkblue") + 
+  labs(x = "Day of Week", y = "P(bones)")
+```
+
+# Trend in bones?
+
+Is there any trend over time in the probabilty of Noodle having bones?
+
+```{r}
+noodle <- 
+  noodle %>% 
+  mutate(bones_bin = case_when(bones == "yes" ~ 1L,
+                               bones == "no" ~ 0L,
+                               TRUE ~ NA_integer_))
+
+ggplot(noodle, aes(x = date, y = bones)) +
+  geom_jitter(width = 0, height = 0.1)
+```
+
+Looks like it would make sense to only focus on recent points, since poor sampling before July 2021
+
+```{r}
+noodle_subset <- noodle %>% filter(date > mdy("July 1, 2021"))
+
+```
+
+
+```{r}
+noodle_m <- glm(bones_bin ~ date, family = binomial, data = noodle_subset)
+car::Anova(noodle_m)
+```
+```{r}
+augment(noodle_m, type.predict = "response", se_fit = TRUE) %>% 
+  ggplot(aes(x = date)) +
+  geom_line(aes(y = .fitted)) +
+  geom_ribbon(aes(ymin = .fitted - .se.fit, ymax = .fitted + .se.fit), alpha =0.4) +
+  geom_point(aes(y = bones_bin), alpha = 0.5, shape = 108, size = 5) +
+  labs(y = "P(bones)")
+```
+
+Probability of bones is increasing over time, but not significantly so.
+
